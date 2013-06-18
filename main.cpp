@@ -113,9 +113,6 @@ void parseDir(const ConfigDTO& config, QMultiMap<QString, QString>& mapping,
     foreach(const QString& file, files) {
         QString absolutePath = current.absoluteFilePath(file);
         QRegExp exclude(config.excludeRegEx);
-
-        qDebug() << absolutePath;
-
         if(config.excludeRegEx.isEmpty() || exclude.indexIn(absolutePath) == -1) {
             if(config.debug) {
                 err << "Analyse file " << absolutePath << "\n";
