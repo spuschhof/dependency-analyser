@@ -18,8 +18,8 @@ public:
 
     bool debug;
     bool groups;
-    bool paths;
     bool ignoreMissing;
+    bool colorize;
     int mergeMode;
     int quoteType;
     QString excludeRegEx;

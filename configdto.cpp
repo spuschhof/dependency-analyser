@@ -5,8 +5,8 @@
 ConfigDTO::ConfigDTO() {
     this->debug = false;
     this->groups = false;
-    this->paths = false;
     this->ignoreMissing = false;
+    this->colorize = false;
     this->mergeMode = MERGE_FILE;
     this->quoteType = QUOTE_BOTH;
 
