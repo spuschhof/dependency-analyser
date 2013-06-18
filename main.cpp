@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QString>
 #include <QTextStream>
+#include <QMultiMap>
 
 #include <iostream>
 
@@ -86,8 +87,109 @@ void printConfig(const ConfigDTO& config) {
     }
 }
 
- parseSource(const ConfigDTO& config) {
+void parseDir(const ConfigDTO& config, QMultiMap<QString, QString>& mapping,
+              const QList<QDir>& includeDirs, const QString& path, QTextStream err) {
+    QDir current(path);
 
+    if(config.debug) {
+        err << "parse directory " << path << "\n";
+        err.flush();
+    }
+
+    //Get subdirectories
+    QStringList subDirs = current.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    foreach(const QString& subDir, subDirs) {
+        parseDir(config, mapping, includeDirs, current.absoluteFilePath(subDir), err);
+    }
+
+    //GetFiles
+    QStringList filter;
+    filter << "*.c" << "*.cc" "*.cpp" << "*.cxx" << "*.h" "*.hpp" << "*.hxx";
+    QStringList files = current.entryList(filter, QDir::Files | QDir::NoDotAndDotDot
+                                          | QDir::Readable);
+
+    foreach(const QString& file, files) {
+        QString absolutePath = current.absoluteFilePath(file);
+        QRegExp exclude(config.excludeRegEx);
+        if(config.excludeRegEx.isEmpty() || exclude.indexIn(absolutePath) == -1) {
+            if(config.debug) {
+                err << "Analyse file " << absolutePath << "\n";
+                err.flush();
+            }
+            QFile currentFile(absolutePath);
+            if(!currentFile.open(QIODevice::ReadOnly)) {
+                err << "Could not read " << absolutePath << "\n";
+            } else {
+                while(currentFile.canReadLine()) {
+                    QString line = currentFile.readLine();
+                    if(line.startsWith("#include ")) {
+                        line = line.right(line.length() - 9);
+                        if(!(line.startsWith("<") && config.quoteType == QUOTE_QUOTE)
+                                && !(line.startsWith("\"")
+                                     && config.quoteType == QUOTE_ANGLE)) {
+                            QRegExp sep("[>\"]");
+                            bool exists = false;
+                            line = line.right(line.length() - 1);
+                            line = line.section(sep, 0, 0);
+
+                            if(config.ignoreMissing) {
+                                exists = true;
+                            } else {
+                                //Check if file exists
+                                if(QFile::exists(current.absoluteFilePath(line))) {
+                                    exists = true;
+                                } else {
+                                    for(int i = 0; i < includeDirs.count() && !exists;
+                                        i++) {
+                                        if(QFile::exists(includeDirs.at(i).
+                                                         absoluteFilePath(line))) {
+                                            exists = true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if(exists) {
+                                mapping.insert(absolutePath, line);
+                            } else {
+                                err << "Could not find include " << line << " from "
+                                    << absolutePath < "\n";
+                                err.flush();
+                            }
+                        }
+                    }
+                }
+            }
+        } else if(config.debug) {
+            err << "Excluding file " << absolutePath << "\n";
+            err.flush();
+        }
+    }
+}
+
+QMultiMap<QString, QString> parseSource(const ConfigDTO& config) {
+    QMultiMap<QString, QString> result;
+    QList<QDir> includeDirs;
+    QTextStream err(stderr);
+
+    //Create include dirs
+    includeDirs << QDir(config.srcPath);
+    foreach(const QString& inclDir, config.includePaths) {
+        includeDirs << QDir(inclDir);
+    }
+    //Check include dirs
+    foreach(const QDir& dir, includeDirs) {
+        if(!dir.exists()) {
+            err << dir.absolutePath() << " does not exists\n";
+        } else if(config.debug) {
+            err << dir.absolutePath() << " exists\n";
+        }
+        err.flush();
+    }
+
+    parseDir(config, result, includeDirs, config.srcPath, err);
+
+    return result;
 }
 
 int main(int argc, char *argv[]) {
