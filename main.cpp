@@ -1,3 +1,23 @@
+/***************************************************************************
+ *   Copyright (C) 2013 by Sebastian Puschhof                              *
+ *   dev@puschhof.de                                                       *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
 #include <QCoreApplication>
 
 #include <QFile>
@@ -9,6 +29,7 @@
 
 #include <iostream>
 #include <stdlib.h>
+#include <math.h>
 
 #include "configdto.h"
 
@@ -23,48 +44,75 @@
 #define OPT_INCLUDE 102
 #define OPT_QUOTES  103
 #define OPT_SRC     104
+#define OPT_EXCLINC 105
+#define OPT_VALUE   106
+#define OPT_SAT     107
 
 #define OPT_PARAM   100
 
-void printHelp() {
-    QTextStream out(stdout);
+#define GOLDEN_SECTION  137.50309
 
-    out << "Graphs #include relationships between every C/C++ source and header file\n"
-           "under the current directory using graphviz.\n\n"
-           "Command line options are:\n\n"
-           "--debug         Display various debug info\n"
-           "--exclude       Specify a regular expression of filenames to ignore\n"
-           "                For example, ignore your test harnesses.\n"
-           "--merge         Granularity of the diagram:\n"
-           "                    file - the default, treats each file as separate\n"
-           "                    module - merges .c/.cc/.cpp/.cxx and .h/.hpp/.hxx pairs\n"
-           "                    directory - merges directories into one node\n"
-           "--groups        Cluster files or modules into directory groups.\n"
-           "                Ignored for \"--merge directory\"\n"
-           "--help          Display this help page.\n"
-           "--include       Followed by a comma separated list of include search\n"
-           "                paths.\n"
-           "--quotetypes    Select for parsing the files included by strip quotes or \n"
-           "                angle brackets:\n"
-           "                    both - the default, parse all headers.\n"
-           "                    angle - include only \"system\" headers included by\n"
-           "                        anglebrackets (<>)\n"
-           "                    quote - include only \"user\" headers included by\n"
-           "                        strip quotes (\"\")\n"
-           "--src           Followed by a path to the source code, defaults to current\n"
-           "                directory\n"
-           "--ignoremissing Assumes missing header files are generated files and\n"
-           "                adds them to the dependency list without raising an error.\n"
-           "                The dependency filename is taken directly from the \n"
-           "                \"#include\" directive without prepending any path\n"
-           "--colorize      Use random colrs for the lines.\n";
-    out.flush();
+#define VERSION "v0.9"
+
+void printHelp() {
+    QTextStream err(stderr);
+
+    err << "dep-analyser " << VERSION << "(C) dev@puschhof.de\n";
+    err << "Released under the terms of the GNU General Public license.\n";
+    err << "Graphs #include relationships between every C/C++ source and header file\n";
+    err << "under the current directory using graphviz.\n\n";
+    err << "Inspired by the perl script cinclude2dot by Darxus@ChaosReigns.com,\n";
+    err << "francis@flourish.org\n";
+    err << "Download from http://www.flourish.org/cinclude2dot/\n";
+    err << "or original version http://www.chaosreigns.com/code/cinclude2dot/\n\n";
+    err << "Command line options are:\n\n";
+    err << "--debug             Display various debug info\n";
+    err << "--exclude           Specify a regular expression of filenames to ignore\n";
+    err << "                    for parsing. For example, ignore your test harnesses.\n";
+    err << "--exclude-includes  Specify a regular expression for \"#include\"\n";
+    err << "                    directives to ignore. For example dependencies to an\n";
+    err << "                    optional library.\n";
+    err << "--merge             Granularity of the diagram:\n";
+    err << "                        file - the default, treats each file as separate\n";
+    err << "                        module - merges .c/.cc/.cpp/.cxx and .h/.hpp/.hxx\n";
+    err << "                                pairs\n";
+    err << "                        directory - merges directories into one node\n";
+    err << "--groups            Cluster files or modules into directory groups.\n";
+    err << "                    Ignored for \"--merge directory\"\n";
+    err << "--help              Display this help page.\n";
+    err << "--include           Followed by a comma separated list of include search\n";
+    err << "                    paths.\n";
+    err << "--quotetypes        Select for parsing the files included by strip quotes\n";
+    err << "                    or angle brackets:\n";
+    err << "                        both - the default, parse all headers.\n";
+    err << "                        angle - include only \"system\" headers included\n";
+    err << "                                by anglebrackets (<>)\n";
+    err << "                        quote - include only \"user\" headers included by\n";
+    err << "                                strip quotes (\"\")\n";
+    err << "--src               Followed by a path to the source code, defaults to\n";
+    err << "                    current directory.\n";
+    err << "--ignoremissing     Assumes missing header files are generated files and\n";
+    err << "                    adds them to the dependency list without raising an\n";
+    err << "                    error.The dependency filename is taken directly from\n";
+    err << "                    the \"#include\" directive without prepending any path\n";
+    err << "--colorize          Use colors for the lines. HSV colrs with a predifined\n";
+    err << "                    value and saturation and a calculated hue are used.\n";
+    err << "--value             Only with \"--colorize\". Sets the value for the line\n";
+    err << "                    colors. Values between 0 and 255 are accepted.\n";
+    err << "                    Default: 240.\n";
+    err << "--sat               Only with \"--colorize\". Sets the saturation for the\n";
+    err << "                    line colors. Values between 0 and 255 are accepted.\n";
+    err << "                    Default: 192.\n\n";
+    err << "Usage:\n";
+    err << "    dep-analyser > deps.dot\n";
+    err << "    dot -Tpng deps.dot -o deps.png\n";
+    err.flush();
     exit(0);
 }
 
 void printConfig(const ConfigDTO& config, QTextStream& err) {
-    err << "Configuration:\n"
-           "Source code directory: " << config.srcPath << "\n";
+    err << "Configuration:\n";
+    err << "Source code directory: " << config.srcPath << "\n";
     err << "Merge mode: ";
     switch(config.mergeMode) {
         case MERGE_FILE: err << "file\n"; break;
@@ -80,8 +128,15 @@ void printConfig(const ConfigDTO& config, QTextStream& err) {
     err << "Create groups: " << (config.groups ? "yes" : "no") << "\n";
     err << "Ignore missing includes: " << (config.ignoreMissing ? "yes" : "no") << "\n";
     err << "Colorize graph: " << (config.colorize ? "yes" : "no") << "\n";
+    if(config.colorize) {
+        err << "Value: " << config.value << "\n";
+        err << "Saturation: " << config.saturation << "\n";
+    }
     if(!config.excludeRegEx.isEmpty()) {
         err << "Exclude: " << config.excludeRegEx;
+    }
+    if(!config.excludeIncludeRegEx.isEmpty()) {
+        err << "Exclude includes: " << config.excludeIncludeRegEx;
     }
     if(!config.includePaths.isEmpty()) {
         err << "Include directories: " << config.includePaths.join("\n\t") << "\n";
@@ -113,6 +168,7 @@ void parseDir(const ConfigDTO& config, QMultiMap<QString, QString>& mapping,
     foreach(const QString& file, files) {
         QString absolutePath = current.absoluteFilePath(file);
         QRegExp exclude(config.excludeRegEx);
+        QRegExp excludeIncl(config.excludeIncludeRegEx);
         if(config.excludeRegEx.isEmpty() || exclude.indexIn(absolutePath) == -1) {
             if(config.debug) {
                 err << "Analyse file " << absolutePath << "\n";
@@ -137,31 +193,37 @@ void parseDir(const ConfigDTO& config, QMultiMap<QString, QString>& mapping,
                             line = line.section(sep, 0, 0);
                             QString includePath = line;
 
-                            //Check if file exists
-                            if(QFile::exists(current.absoluteFilePath(line))) {
-                                exists = true;
-                                includePath = current.absoluteFilePath(line);
-                            } else {
-                                for(int i = 0; i < includeDirs.count() && !exists;
-                                    i++) {
-                                    if(QFile::exists(includeDirs.at(i).
-                                                     absoluteFilePath(line))) {
-                                        exists = true;
-                                        includePath = includeDirs.at(i).
-                                                absoluteFilePath(line);
+                            if(config.excludeIncludeRegEx.isEmpty()
+                                    || excludeIncl.indexIn(includePath) == -1) {
+                                //Check if file exists
+                                if(QFile::exists(current.absoluteFilePath(line))) {
+                                    exists = true;
+                                    includePath = current.absoluteFilePath(line);
+                                } else {
+                                    for(int i = 0; i < includeDirs.count() && !exists;
+                                        i++) {
+                                        if(QFile::exists(includeDirs.at(i).
+                                                         absoluteFilePath(line))) {
+                                            exists = true;
+                                            includePath = includeDirs.at(i).
+                                                    absoluteFilePath(line);
+                                        }
                                     }
                                 }
-                            }
 
-                            if(config.ignoreMissing) {
-                                exists = true;
-                            }
+                                if(config.ignoreMissing) {
+                                    exists = true;
+                                }
 
-                            if(exists) {
-                                mapping.insert(absolutePath, includePath);
-                            } else {
-                                err << "Could not find include " << includePath
-                                    << " from " << absolutePath << "\n";
+                                if(exists) {
+                                    mapping.insert(absolutePath, includePath);
+                                } else {
+                                    err << "Could not find include " << includePath
+                                        << " from " << absolutePath << "\n";
+                                    err.flush();
+                                }
+                            } else if(config.debug) {
+                                err << "Ignoring include " << includePath << "\n";
                                 err.flush();
                             }
                         }
@@ -248,31 +310,67 @@ QString removeBaseDir(QString path, const QString& baseDir) {
     return path;
 }
 
-QString randomColor() {
-    int red = qrand() % 256;
-    int green = qrand() % 256;
-    int blue = qrand() % 256;
+QString nextColor(int saturation, int value) {
+    static double hue = 0.0;
+    int r, g, b;
 
-    red = (red + 255) / 2;
-    green = (green + 255) / 2;
-    blue = (blue + 255) / 2;
+    if (saturation == 0) {
+        r = value;
+        g = value;
+        b = value;
+    } else {
+        unsigned int region, remainder, p, q, t;
+        int iHue = 0;
 
-    return QString("#%1%2%3").arg(QString::number(red, 16)).
-            arg(QString::number(green, 16)).arg(QString::number(blue, 16));
+        hue += GOLDEN_SECTION;
+        iHue = (int) floor(fmod(hue, 360.0));
+
+        region = iHue / 60;
+        remainder = (iHue - (region * 60)) * 6;
+
+        p = (value * (255 - saturation)) / 256;
+        q = (value * (255 - ((saturation * remainder) / 256))) / 256;
+        t = (value * (255 - ((saturation * (255 - remainder)) / 256))) / 256;
+
+        switch (region) {
+            case 0:
+                r = value; g = t; b = p;
+                break;
+            case 1:
+                r = q; g = value; b = p;
+                break;
+            case 2:
+                r = p; g = value; b = t;
+                break;
+            case 3:
+                r = p; g = q; b = value;
+                break;
+            case 4:
+                r = t; g = p; b = value;
+                break;
+            default:
+                r = value; g = p; b = q;
+                break;
+        }
+    }
+
+    return QString("#%1%2%3").arg(QString::number(r, 16)).
+            arg(QString::number(g, 16)).arg(QString::number(b, 16));
 }
 
 void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
-                  bool group, bool colorize, const QString& baseDir) {
+                  bool group, bool colorize, int saturation, int value,
+                  const QString& baseDir) {
     QStringList keys = mapping.keys();
     keys.removeDuplicates();
 
     //Write header
-    out << "digraph \"source tree\" {\n"
-           "    overlap=scale;\n"
-           "    ratio=\"auto\";\n"
-           "    fontsize=\"16\";\n"
-           "    fontname=\"Helvetica\";\n"
-           "    clusterrank=\"local\";\n";
+    out << "digraph \"source tree\" {\n";
+    out << "    overlap=scale;\n";
+    out << "    ratio=\"auto\";\n";
+    out << "    fontsize=\"16\";\n";
+    out << "    fontname=\"Helvetica\";\n";
+    out << "    clusterrank=\"local\";\n";
 
     if(group) {
         QStringList allNodes = keys;
@@ -287,10 +385,10 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
             escDir = dir;
             escDir = escDir.replace('/', "_");
 
-            out << "subgraph \"cluster_" << escDir << "\" {\n"
-                   "    label=\"" << dir << "\"\n"
-                   "    \"" << file << "\"\n"
-                   "}\n";
+            out << "subgraph \"cluster_" << escDir << "\" {\n";
+            out << "    label=\"" << dir << "\"\n";
+            out << "    \"" << file << "\"\n";
+            out << "}\n";
         }
     }
 
@@ -313,7 +411,7 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
         out << "}";
 
         if(colorize) {
-            out << " [color=\"" << randomColor() << "\"]";
+            out << " [color=\"" << nextColor(saturation, value) << "\"]";
         }
 
         out << "\n";
@@ -334,6 +432,7 @@ int main(int argc, char *argv[]) {
         QString opt = QString::fromUtf8(argv[i]);
         QString optValue;
         int optCode = OPT_UNKNOWN;
+        bool converted = true;
 
         if(opt.compare("--debug") == 0) {
             optCode = OPT_DEBUG;
@@ -356,9 +455,15 @@ int main(int argc, char *argv[]) {
             optCode = OPT_IGNMIS;
         } else if(opt.compare("--colorize") == 0) {
             optCode = OPT_COLOR;
+        } else if(opt.compare("--exclude-includes") == 0) {
+            optCode = OPT_EXCLINC;
+        } else if(opt.compare("--value") == 0) {
+            optCode = OPT_VALUE;
+        } else if(opt.compare("--sat") == 0) {
+            optCode = OPT_SAT;
         } else {
-            out << "Unknown argument " << opt << "\n";
-            out.flush();
+            err << "Unknown argument " << opt << "\n";
+            err.flush();
             printHelp();
         }
 
@@ -367,8 +472,8 @@ int main(int argc, char *argv[]) {
                 optValue = QString::fromUtf8(argv[i + 1]);
                 i += 2;
             } else {
-                out << "Argument " << opt << " needs a value\n";
-                out.flush();
+                err << "Argument " << opt << " needs a value\n";
+                err.flush();
                 printHelp();
             }
         } else {
@@ -381,6 +486,7 @@ int main(int argc, char *argv[]) {
             case OPT_IGNMIS: config.ignoreMissing = true; break;
             case OPT_COLOR: config.colorize = true; break;
             case OPT_EXCLUDE: config.excludeRegEx = optValue; break;
+            case OPT_EXCLINC: config.excludeIncludeRegEx = optValue; break;
             case OPT_SRC: {
                     QDir srcDir(optValue);
                     config.srcPath = srcDir.absolutePath();
@@ -397,8 +503,8 @@ int main(int argc, char *argv[]) {
                 } else if(optValue.compare("directory") == 0) {
                     config.mergeMode = MERGE_DIR;
                 } else {
-                    out << "Unknown merge mode " << optValue << "\n";
-                    out.flush();
+                    err << "Unknown merge mode " << optValue << "\n";
+                    err.flush();
                     printHelp();
                 }
                 break;
@@ -410,14 +516,30 @@ int main(int argc, char *argv[]) {
                 } else if(optValue.compare("quote") == 0) {
                     config.quoteType = QUOTE_QUOTE;
                 } else {
-                    out << "Unknown quote type " << optValue << "\n";
-                    out.flush();
+                    err << "Unknown quote type " << optValue << "\n";
+                    err.flush();
+                    printHelp();
+                }
+                break;
+            case OPT_VALUE:
+                config.value = optValue.toInt(&converted);
+                if(!converted || config.value < 0 || config.value > 255) {
+                    err << "Illegal value for value: " << optValue << "\n";
+                    err.flush();
+                    printHelp();
+                }
+                break;
+            case OPT_SAT:
+                config.saturation = optValue.toInt(&converted);
+                if(!converted || config.saturation < 0 || config.saturation > 255) {
+                    err << "Illegal value for saturation: " << optValue << "\n";
+                    err.flush();
                     printHelp();
                 }
                 break;
             default:
-                out << "Internal error... This should not have happended\n";
-                out.flush();
+                err << "Internal error... This should not have happended\n";
+                err.flush();
                 printHelp();
         }
     }
@@ -449,5 +571,5 @@ int main(int argc, char *argv[]) {
     }
 
     printMapping(mapping, out, (config.groups && config.mergeMode != MERGE_DIR),
-                 config.colorize, config.srcPath);
+                 config.colorize, config.saturation, config.value, config.srcPath);
 }
