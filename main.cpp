@@ -95,7 +95,7 @@ void printHelp() {
     err << "                    adds them to the dependency list without raising an\n";
     err << "                    error.The dependency filename is taken directly from\n";
     err << "                    the \"#include\" directive without prepending any path\n";
-    err << "--colorize          Use colors for the lines. HSV colrs with a predifined\n";
+    err << "--colorize          Use colors for the lines. HSV colros with a predifined\n";
     err << "                    value and saturation and a calculated hue are used.\n";
     err << "--value             Only with \"--colorize\". Sets the value for the line\n";
     err << "                    colors. Values between 0 and 255 are accepted.\n";
