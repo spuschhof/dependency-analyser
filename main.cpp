@@ -311,46 +311,66 @@ QString removeBaseDir(QString path, const QString& baseDir) {
 }
 
 QString nextColor(int saturation, int value) {
-    static double hue = 0.0;
+    static qreal hue = 0.0;
     int r, g, b;
+    r = 0;
+    g = 0;
+    b = 0;
 
     if (saturation == 0) {
+        // achromatic case
         r = value;
         g = value;
         b = value;
     } else {
-        unsigned int region, remainder, p, q, t;
-        int iHue = 0;
-
+        // chromatic case
         hue += GOLDEN_SECTION;
-        iHue = (int) floor(fmod(hue, 360.0));
+        hue = fmod(hue, 360.0);
+        const qreal h = hue / qreal(60.0);
+        const qreal s = saturation / qreal(255.0);
+        const qreal v = value / qreal(255.0);
+        const int i = int(h);
+        const qreal f = h - i;
+        const qreal p = v * (qreal(1.0) - s);
 
-        region = iHue / 60;
-        remainder = (iHue - (region * 60)) * 6;
-
-        p = (value * (255 - saturation)) / 256;
-        q = (value * (255 - ((saturation * remainder) / 256))) / 256;
-        t = (value * (255 - ((saturation * (255 - remainder)) / 256))) / 256;
-
-        switch (region) {
-            case 0:
-                r = value; g = t; b = p;
-                break;
-            case 1:
-                r = q; g = value; b = p;
-                break;
-            case 2:
-                r = p; g = value; b = t;
-                break;
-            case 3:
-                r = p; g = q; b = value;
-                break;
-            case 4:
-                r = t; g = p; b = value;
-                break;
-            default:
-                r = value; g = p; b = q;
-                break;
+        if (i & 1) {
+            const qreal q = v * (qreal(1.0) - (s * f));
+            switch (i) {
+                case 1:
+                    r = qRound(q * 255);
+                    g = qRound(v * 255);
+                    b = qRound(p * 255);
+                    break;
+                case 3:
+                    r = qRound(p * 255);
+                    g = qRound(q * 255);
+                    b = qRound(v * 255);
+                    break;
+                case 5:
+                    r = qRound(v * 255);
+                    g = qRound(p * 255);
+                    b = qRound(q * 255);
+                    break;
+            }
+        } else {
+            const qreal t = v * (qreal(1.0) - (s * (qreal(1.0) - f)));
+            switch (i) {
+                case 0:
+                    r = qRound(v * 255);
+                    g = qRound(t * 255);
+                    b = qRound(p * 255);
+                    break;
+                case 2:
+                    r = qRound(p * 255);
+                    g = qRound(v * 255);
+                    b = qRound(t * 255);
+                    break;
+                case 4:
+                    r = qRound(t * 255);
+                    g = qRound(p * 255);
+                    b = qRound(v * 255);
+                    break;
+            }
         }
     }
 
