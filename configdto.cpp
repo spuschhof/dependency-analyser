@@ -20,12 +20,15 @@
 #include "configdto.h"
 
 #include <QDir>
+#include <QFile>
 
 ConfigDTO::ConfigDTO() {
     this->debug = false;
     this->groups = false;
     this->ignoreMissing = false;
     this->colorize = false;
+    this->keepPaths = false;
+    this->colorNodes = false;
     this->mergeMode = MERGE_FILE;
     this->quoteType = QUOTE_BOTH;
     this->value = 128;
@@ -37,4 +40,41 @@ ConfigDTO::ConfigDTO() {
 #endif
 
     this->srcPath = QDir::currentPath();
+
+    this->cmdProvided = 0;
+}
+
+QString ConfigDTO::getNodeColor(int dependencies) const {
+    QList<int> thresholds = this->nodeColorMap.keys();
+    int index = thresholds.count() - 1;
+
+    while(index > 0 && thresholds.at(index) > dependencies) {
+        index--;
+    }
+
+    if((index == 0 && dependencies < thresholds.at(index)) || index < 0) {
+        return "white";
+    }
+
+    return this->nodeColorMap.value(thresholds.at(index));
+}
+
+ConfigDTO ConfigDTO::parseConfigFile(const QString &file, const ConfigDTO &argDTO,
+                                     QTextStream &err, bool* error) {
+    if(error) {
+        *error = false;
+    }
+    ConfigDTO parsedDTO;
+
+    if(QFile::exists(file)) {
+        //TODO: Implement configration file parsing
+    } else {
+        if(error) {
+            *error = true;
+        }
+        err << "Configuration file " << file << " does not exists.\n";
+        err.flush();
+    }
+
+    return parsedDTO;
 }

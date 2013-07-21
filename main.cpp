@@ -33,26 +33,9 @@
 
 #include "configdto.h"
 
-#define OPT_UNKNOWN -1
-#define OPT_HELP    0
-#define OPT_DEBUG   1
-#define OPT_GROUPS  2
-#define OPT_IGNMIS  3
-#define OPT_COLOR   4
-#define OPT_EXCLUDE 100
-#define OPT_MERGE   101
-#define OPT_INCLUDE 102
-#define OPT_QUOTES  103
-#define OPT_SRC     104
-#define OPT_EXCLINC 105
-#define OPT_VALUE   106
-#define OPT_SAT     107
-
-#define OPT_PARAM   100
-
 #define GOLDEN_SECTION  137.50309
 
-#define VERSION "v0.9"
+#define VERSION "v0.9.1"
 
 void printHelp() {
     QTextStream err(stderr);
@@ -95,14 +78,27 @@ void printHelp() {
     err << "                    adds them to the dependency list without raising an\n";
     err << "                    error.The dependency filename is taken directly from\n";
     err << "                    the \"#include\" directive without prepending any path\n";
-    err << "--colorize          Use colors for the lines. HSV colros with a predifined\n";
+    err << "--colorize          Use colors for the lines. HSV colors with a predifined\n";
     err << "                    value and saturation and a calculated hue are used.\n";
     err << "--value             Only with \"--colorize\". Sets the value for the line\n";
     err << "                    colors. Values between 0 and 255 are accepted.\n";
     err << "                    Default: 240.\n";
     err << "--sat               Only with \"--colorize\". Sets the saturation for the\n";
     err << "                    line colors. Values between 0 and 255 are accepted.\n";
-    err << "                    Default: 192.\n\n";
+    err << "                    Default: 192.\n";
+    err << "--keep-paths        Keep the directory names for the nodes when \n";
+    err << "                    \"--groups\" is used.\n";
+    err << "--color-nodes       Colorize the nodes depending on the number nodes which\n";
+    err << "                    depend on this node. Provide the threshold and colors\n";
+    err << "                    as comma-separated list. Colors may be provided as SVG\n";
+    err << "                    color name or hexadecimal color code formatted as\n";
+    err << "                    #RRGGBB.\n";
+    err << "                    Example: 0,white,1,#00FF00,3,yellow,5,#FF0000\n";
+    err << "--config            Provide a config file which contains the options for\n";
+    err << "                    dep-analyser. Command line options override settings\n";
+    err << "                    in the configuration file.\n";
+    err << "                    NOTE: Not yet functional!";
+    err << "\n";
     err << "Usage:\n";
     err << "    dep-analyser > deps.dot\n";
     err << "    dot -Tpng deps.dot -o deps.png\n";
@@ -379,9 +375,10 @@ QString nextColor(int saturation, int value) {
 }
 
 void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
-                  bool group, bool colorize, int saturation, int value,
-                  const QString& baseDir) {
+                  const ConfigDTO& config) {
     QStringList keys = mapping.keys();
+    QString baseDir = config.srcPath;
+    bool group = config.groups && config.mergeMode != MERGE_DIR;
     keys.removeDuplicates();
 
     //Write header
@@ -392,6 +389,44 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
     out << "    fontname=\"Helvetica\";\n";
     out << "    clusterrank=\"local\";\n";
 
+    if(config.colorNodes) {
+        QMap<QString, int> allObjects;
+        foreach(const QString& key, keys) {
+            QString name = removeBaseDir(key, baseDir);
+
+            if (group && !config.keepPaths) {
+                name = name.section('/', -1, -1);
+            }
+
+            if (!allObjects.contains(name)) {
+                allObjects.insert(name, 0);
+            }
+            QStringList values = mapping.values(key);
+
+            foreach(const QString& value, values) {
+                name = removeBaseDir(value, baseDir);
+                if (group && !config.keepPaths) {
+                    name = name.section('/', -1, -1);
+                }
+
+                if (allObjects.contains(name)) {
+                    allObjects.insert(name, allObjects.value(name, 0) + 1);
+                } else {
+                    allObjects.insert(name, 1);
+                }
+            }
+        }
+
+        QMap<QString, int>::iterator it = allObjects.begin();
+
+        while (it != allObjects.end()) {
+            int keyCount = it.value();
+            out << "    \"" << it.key() << "\" [style=filled, color="
+                << config.getNodeColor(keyCount) << "]\n";
+            it++;
+        }
+    }
+
     if(group) {
         QStringList allNodes = keys;
         allNodes << mapping.values();
@@ -401,7 +436,11 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
             QString file = key;
             QString escDir;
             dir = removeBaseDir(dir.section('/', 0, -2), baseDir);
-            file = file.section('/', -1, -1);
+            if(config.keepPaths) {
+                file = removeBaseDir(file, baseDir);
+            } else {
+                file = file.section('/', -1, -1);
+            }
             escDir = dir;
             escDir = escDir.replace('/', "_");
 
@@ -415,14 +454,14 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
     foreach(const QString& key, keys) {
         QStringList values = mapping.values(key);
         QString name = removeBaseDir(key, baseDir);
-        if(group) {
+        if(group && !config.keepPaths) {
             name = name.section('/', -1);
         }
         out << "    \"" << name << "\" -> { ";
 
         foreach(const QString& value, values) {
             QString include = removeBaseDir(value, baseDir);
-            if(group) {
+            if(group && !config.keepPaths) {
                 include = include.section('/', -1);
             }
             out << "\"" << include << "\" ";
@@ -430,8 +469,8 @@ void printMapping(const QMultiMap<QString, QString>& mapping, QTextStream& out,
 
         out << "}";
 
-        if(colorize) {
-            out << " [color=\"" << nextColor(saturation, value) << "\"]";
+        if(config.colorize) {
+            out << " [color=\"" << nextColor(config.saturation, config.value) << "\"]";
         }
 
         out << "\n";
@@ -446,6 +485,8 @@ int main(int argc, char *argv[]) {
     QTextStream err(stderr);
     ConfigDTO config;
     QMultiMap<QString, QString> mapping;
+    bool hasConfigFile = false;
+    QString configFile;
 
     //Parse command line options
     for(int i = 1; i < argc;) {
@@ -481,6 +522,12 @@ int main(int argc, char *argv[]) {
             optCode = OPT_VALUE;
         } else if(opt.compare("--sat") == 0) {
             optCode = OPT_SAT;
+        } else if(opt.compare("--keep-paths") == 0) {
+            optCode = OPT_KEEP;
+        } else if(opt.compare("--color-nodes") == 0) {
+            optCode = OPT_COLOR_NODES;
+        } else if(opt.compare("--config") == 0) {
+            optCode = OPT_CONFIG;
         } else {
             err << "Unknown argument " << opt << "\n";
             err.flush();
@@ -505,6 +552,7 @@ int main(int argc, char *argv[]) {
             case OPT_GROUPS: config.groups = true; break;
             case OPT_IGNMIS: config.ignoreMissing = true; break;
             case OPT_COLOR: config.colorize = true; break;
+            case OPT_KEEP: config.keepPaths = true; break;
             case OPT_EXCLUDE: config.excludeRegEx = optValue; break;
             case OPT_EXCLINC: config.excludeIncludeRegEx = optValue; break;
             case OPT_SRC: {
@@ -516,6 +564,7 @@ int main(int argc, char *argv[]) {
                 config.includePaths << optValue.split(",", QString::SkipEmptyParts);
                 break;
             case OPT_MERGE:
+                config.cmdProvided |= PROV_MERGE;
                 if(optValue.compare("file") == 0) {
                     config.mergeMode = MERGE_FILE;
                 } else if(optValue.compare("module") == 0) {
@@ -529,6 +578,7 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case OPT_QUOTES:
+                config.cmdProvided |= PROV_QUOTE;
                 if(optValue.compare("both") == 0) {
                     config.quoteType = QUOTE_BOTH;
                 } else if(optValue.compare("angle") == 0) {
@@ -543,6 +593,7 @@ int main(int argc, char *argv[]) {
                 break;
             case OPT_VALUE:
                 config.value = optValue.toInt(&converted);
+                config.cmdProvided |= PROV_VALUE;
                 if(!converted || config.value < 0 || config.value > 255) {
                     err << "Illegal value for value: " << optValue << "\n";
                     err.flush();
@@ -551,16 +602,52 @@ int main(int argc, char *argv[]) {
                 break;
             case OPT_SAT:
                 config.saturation = optValue.toInt(&converted);
+                config.cmdProvided |= PROV_SAT;
                 if(!converted || config.saturation < 0 || config.saturation > 255) {
                     err << "Illegal value for saturation: " << optValue << "\n";
                     err.flush();
                     printHelp();
                 }
                 break;
+            case OPT_COLOR_NODES: {
+                config.colorNodes = true;
+                QStringList parts = optValue.split(',', QString::SkipEmptyParts);
+                if(parts.count() % 2 != 0) {
+                    err << "--color-nodes requires a configuration list with an even\n";
+                    err << "number of elements.\n";
+                    err.flush();
+                    printHelp();
+                } else {
+                    for(int i = 0; i < parts.count(); i += 2) {
+                        int threshold = parts.at(i).toInt(&converted);
+                        QString color = parts.at(i + 1);
+                        if(!converted || threshold < 0) {
+                            err << parts.at(i) << " is not a valid threshold.\n";
+                            err.flush();
+                            printHelp();
+                        } else {
+                            config.nodeColorMap.insert(threshold, color);
+                        }
+                    }
+                }
+                }
+                break;
+            case OPT_CONFIG:
+                hasConfigFile = true;
+                configFile = optValue;
+                break;
             default:
                 err << "Internal error... This should not have happended\n";
                 err.flush();
                 printHelp();
+        }
+    }
+
+    if(hasConfigFile) {
+        bool error;
+        config = ConfigDTO::parseConfigFile(configFile, config, err, &error);
+        if(error) {
+            exit(1);
         }
     }
 
@@ -590,6 +677,5 @@ int main(int argc, char *argv[]) {
         err.flush();
     }
 
-    printMapping(mapping, out, (config.groups && config.mergeMode != MERGE_DIR),
-                 config.colorize, config.saturation, config.value, config.srcPath);
+    printMapping(mapping, out, config);
 }
